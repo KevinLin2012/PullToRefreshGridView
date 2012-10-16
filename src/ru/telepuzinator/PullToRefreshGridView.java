@@ -39,6 +39,9 @@ public class PullToRefreshGridView extends LinearLayout {
 	private ImageView headerImage;
 	private ProgressBar headerProgress;
 	private Animation flipAnimation, reverseAnimation;
+	
+	private BaseAdapter gridAdapter;
+	private EmptyViewAdapter emptyAdapter;
 
 	private int headerHeight;
 	private float startY = -1;
@@ -80,6 +83,7 @@ public class PullToRefreshGridView extends LinearLayout {
 	}
 
 	public void setAdapter(BaseAdapter adapter) {
+		this.gridAdapter = adapter;
 		gridView.setAdapter(adapter);
 		resetHeader();
 	}
@@ -141,7 +145,7 @@ public class PullToRefreshGridView extends LinearLayout {
 	}
 
 	public void setRefreshed() {
-		state = REFRESHING;
+		setState(REFRESHING);
 		
 		setHeaderScroll(headerHeight);
 		
@@ -149,7 +153,7 @@ public class PullToRefreshGridView extends LinearLayout {
 	}
 
 	public ListAdapter getAdapter() {
-		return gridView.getAdapter();
+		return gridAdapter;
 	}
 
 	public void setOnScrollListener(OnScrollListener listener) {
@@ -168,8 +172,25 @@ public class PullToRefreshGridView extends LinearLayout {
 		return gridView.getChildAt(index);
 	}
 
-	public void setEmptyView(View emptyView) {
-		gridView.setEmptyView(emptyView);
+	public void setEmptyText(String text) {
+		emptyAdapter.setText(text);
+	}
+	
+	boolean empty = true;
+	public void showEmptyView(boolean show) {
+		empty = show;
+		if(show) {
+			gridView.setAdapter(emptyAdapter);
+		} else {
+			gridView.setAdapter(gridAdapter);
+		}
+	}
+	
+	private void changeEmptyView(boolean showProgress) {
+		emptyAdapter.changeEmptyView(showProgress);
+		if(empty) {
+			gridView.setAdapter(emptyAdapter);
+		}
 	}
 	
 	@Override
@@ -233,8 +254,27 @@ public class PullToRefreshGridView extends LinearLayout {
 		reverseAnimation.setInterpolator(new LinearInterpolator());
 		reverseAnimation.setDuration(250);
 		reverseAnimation.setFillAfter(true);
+		
+		emptyAdapter = new EmptyViewAdapter(context);
+		gridView.setAdapter(emptyAdapter);
 	
 		setPadding(getPaddingLeft(), -headerHeight, getPaddingRight(), getPaddingBottom());
+	}
+	
+	private void setState(int state) {
+		this.state = state;
+		changeEmptyView(state == REFRESHING);
+		switch(state) {
+		case PULL_TO_REFRESH:
+			headerText.setText(R.string.pull_to_refresh_pull_label);
+			break;
+		case REFRESHING:
+			headerText.setText(R.string.pull_to_refresh_refreshing_label);
+			break;
+		case RELEASE_TO_REFRESH:
+			headerText.setText(R.string.pull_to_refresh_release_label);
+			break;
+		}
 	}
 
 	private void measureView(View child) {
@@ -293,14 +333,19 @@ public class PullToRefreshGridView extends LinearLayout {
 	}
 
 	private void resetHeader() {
-		state = PULL_TO_REFRESH;
+		setState(PULL_TO_REFRESH);
 		initializeYsHistory();
 		startY = -1;
 		setUpdating(false);
-		headerText.setText(R.string.pull_to_refresh_pull_label);
 		headerImage.clearAnimation();
 	
 		setHeaderScroll(0);
+		
+		if(gridAdapter != null && gridAdapter.getCount() > 0) {
+			showEmptyView(false);
+		} else {
+			showEmptyView(true);
+		}
 	}
 	
 	private void setUpdating(boolean updating) {
@@ -317,14 +362,12 @@ public class PullToRefreshGridView extends LinearLayout {
 		setHeaderScroll((int) (height));
 	
 		if (state == PULL_TO_REFRESH && height - headerHeight > 0) {
-			state = RELEASE_TO_REFRESH;
-			headerText.setText(R.string.pull_to_refresh_release_label);
+			setState(RELEASE_TO_REFRESH);
 			headerImage.clearAnimation();
 			headerImage.startAnimation(flipAnimation);
 		}
 		if (state == RELEASE_TO_REFRESH && height - headerHeight <= 0) {
-			state = PULL_TO_REFRESH;
-			headerText.setText(R.string.pull_to_refresh_pull_label);
+			setState(PULL_TO_REFRESH);
 			headerImage.clearAnimation();
 			headerImage.startAnimation(reverseAnimation);
 		}
@@ -364,15 +407,15 @@ public class PullToRefreshGridView extends LinearLayout {
 
 	private boolean isPullingDownToRefresh() {
 		return canPullDownToRefresh && state != REFRESHING && isIncremental()
-			&& isFirstVisible() && getAdapter() != null
-			&& getAdapter().getCount() != 0;
+			&& isFirstVisible();
 	}
 
 	private boolean isFirstVisible() {
 		if (this.gridView.getCount() == 0) {
 			return true;
 		} else if (gridView.getFirstVisiblePosition() == 0) {
-			return gridView.getChildAt(0).getTop() >= gridView.getTop();
+			return gridView.getChildAt(0) == null ||
+					gridView.getChildAt(0).getTop() >= gridView.getTop() - 3;
 		} else {
 			return false;
 		}
@@ -403,6 +446,73 @@ public class PullToRefreshGridView extends LinearLayout {
 			setHeaderScroll(top);
 		
 			handler.postDelayed(hideHeaderRunnable, 20);
+		}
+	}
+	
+	private class EmptyViewAdapter extends BaseAdapter {
+		private View emptyView;
+		private TextView emptyText;
+		private ProgressBar emptyProgress;
+		
+		private Context context;
+		private String text;
+		private boolean showProgress = true;
+		
+		public EmptyViewAdapter(Context context) {
+			this.context = context;
+		}
+		
+		public void changeEmptyView(boolean showProgress) {
+			this.showProgress = showProgress;
+			notifyDataSetChanged();
+		}
+
+		public void setText(String text) {
+			this.text = text;
+		}
+
+		@Override
+		public int getCount() {
+			return 1;
+		}
+
+		@Override
+		public Object getItem(int position) {
+			return null;
+		}
+
+		@Override
+		public long getItemId(int position) {
+			return 0;
+		}
+
+		@Override
+		public View getView(int position, View convertView, ViewGroup parent) {
+			if(convertView == null) {
+				emptyView = LayoutInflater.from(context).inflate(R.layout.empty_view, parent, false);
+				copyLayout(emptyView);
+				emptyText = (TextView) emptyView.findViewById(R.id.empty_view_text);
+				emptyProgress = (ProgressBar) emptyView.findViewById(R.id.empty_view_progress);
+				
+				if(text.length() > 0) emptyText.setText(text);
+				
+				emptyText.setVisibility(showProgress ? View.GONE : View.VISIBLE);
+				emptyProgress.setVisibility(showProgress ? View.VISIBLE : View.GONE);
+				return emptyView;
+			} else {
+				copyLayout(convertView);
+				return convertView;
+			}
+		}
+		
+		//set to center
+		private void copyLayout(View child) {
+			if(gridView.getHeight() > 0) {
+				ViewGroup.LayoutParams lp = emptyView.getLayoutParams();
+				lp.height = gridView.getHeight();
+				lp.width = gridView.getWidth();
+				emptyView.setLayoutParams(lp);
+			}
 		}
 	}
 }
